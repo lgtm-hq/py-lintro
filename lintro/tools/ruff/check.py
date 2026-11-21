@@ -337,6 +337,9 @@ def execute_ruff_check(
         # A single file set can certify both capabilities only over their
         # intersection. Each native command can have different exclusions.
         coverage &= format_coverage
+    # Every invocation was handed ctx.rel_files; state them once all of
+    # them finished with a verdict (#3578).
+    tool._record_checked(ctx.files if complete else ())
 
     return ToolResult.from_outcome(
         ToolOutcome(

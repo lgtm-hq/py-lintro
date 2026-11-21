@@ -376,6 +376,9 @@ class BlackPlugin(BaseToolPlugin):
         complete = not (execution_failed or parse_failures or supplement.failed)
         # A skipped E501 supplement is not a failure, but E501 was not checked.
         measured = complete and not supplement.skipped
+        if measured:
+            # Both invocations were handed ctx.rel_files and finished (#3578).
+            self._record_checked(ctx.files)
 
         return ToolResult.from_outcome(
             ToolOutcome(

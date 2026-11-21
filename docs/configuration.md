@@ -651,12 +651,16 @@ The rule for recording a file is fail closed:
   record. Nothing is written when the tool was not installed, its version was refused,
   it was skipped, it timed out, its run failed or was incomplete, or the run was stopped
   (Ctrl-C, an exception, a kill). The next incremental run checks those files again.
-- **Only files lintro passed to the tool are recorded.** A file counts as passed when it
-  appears as a plain file argument of a command the plugin ran (not as the value of an
-  option such as `--config`). A plugin that narrows its list after discovery (a ruleset
-  or project-root lookup, an include list, a file cap) records only what it passed; a
-  tool that is handed a directory, a project or a manifest instead of files, or that
-  runs in-process, records nothing, so `--incremental` never narrows it.
+- **A file is recorded only if the code that ran the tool states it handed that exact
+  discovered path to an invocation that completed.** The shared per-file and batch
+  runners state the list they pass; ruff, black, pylint (after `include`), taplo, typos
+  (text files only), spectral (per ruleset group) and bandit (the files its report says
+  it scanned) state their own. Every other tool states nothing and is never narrowed by
+  `--incremental`: mypy (a whole-project analyser), gitleaks (scans a directory or the
+  git history), golangci-lint, clippy and rustfmt (projects), import-linter (contracts),
+  tsc, vue-tsc, svelte-check and astro check, and the tools not yet audited (actionlint,
+  buf, html-validate, markdownlint, stylelint, trufflehog, vale, yamllint). A symlink
+  and its target are separate entries.
 - **A clean result needs evidence that files were read.** A successful run with no
   finding records files only when the tool reports that it inspected them; a run in
   which part of the check was skipped (black's E501 supplement without ruff) records
@@ -672,6 +676,11 @@ The rule for recording a file is fail closed:
   edited during the run is checked again next time.
 - A record that cannot be read (invalid bytes, malformed JSON) is discarded and every
   file is checked.
+- **Known gap: configuration is not part of the record.** A file lintro handed to a tool
+  that the tool's own ignore settings then skipped (`ignore:` in `.yamllint`, a
+  `.prettierignore` entry, ruff's `extend-exclude`) is recorded as clean, and removing
+  the ignore later does not re-check it; neither does any other change to a tool's
+  configuration or version. Run `lintro check --no-cache` after changing them.
 
 Tools whose result depends on data that changes independently of the files declare
 `incremental_cacheable=False` and are never narrowed: `cargo_audit`, `cargo_deny`,

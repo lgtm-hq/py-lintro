@@ -602,13 +602,16 @@ class BanditPlugin(BaseToolPlugin):
             # A clean report whose metrics name none of the requested files
             # scanned nothing: Bandit's own configuration excluded them all,
             # so the run is "no files", never an inspection (#3388).
-            if not issues and _scanned_files(bandit_data, ctx.files) == []:
+            scanned = _scanned_files(bandit_data, ctx.files)
+            if not issues and scanned == []:
                 logger.debug("[bandit] Bandit's configuration excluded every file")
                 return ToolResult.from_outcome(
                     ToolOutcome(execution=NoFiles()),
                     name=self.definition.name,
                     output=BANDIT_ALL_EXCLUDED_MESSAGE,
                 )
+            # Bandit's own metrics name the files it scanned (#3578).
+            self._record_checked(scanned or ())
 
             # Every record parsed and every file was scanned: the findings
             # are complete and can be baselined.

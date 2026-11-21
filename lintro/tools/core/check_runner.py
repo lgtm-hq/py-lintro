@@ -179,7 +179,7 @@ def run_per_file_check(
         Returns:
             FileProcessingResult for the aggregator.
         """
-        return check_one_file(
+        outcome = check_one_file(
             plugin=plugin,
             cmd=command(file_path),
             parse=parse,
@@ -188,6 +188,10 @@ def run_per_file_check(
             issues_imply_failure=policy.issues_imply_failure,
             findings_exit_codes=policy.findings_exit_codes,
         )
+        # The invocation was handed exactly this discovered path (#3578).
+        if outcome.inspected_files is True and outcome.error is None:
+            plugin._record_checked([file_path])
+        return outcome
 
     result = plugin._process_files_with_progress(
         files=ctx.files,

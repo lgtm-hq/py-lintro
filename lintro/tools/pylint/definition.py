@@ -447,6 +447,13 @@ class PylintPlugin(BaseToolPlugin):
                 name=self.definition.name,
             )
 
+        handed = set(files)
+        # pylint was handed only the files left after ``include`` (#3578).
+        self._record_checked(
+            path
+            for path, rel in zip(ctx.files, ctx.rel_files, strict=True)
+            if rel in handed
+        )
         stdout = (result.stdout or "").strip()
         stderr = (result.stderr or "").strip()
         if stderr:

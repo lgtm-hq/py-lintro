@@ -392,6 +392,27 @@ def batch_check_result(
     )
 
 
+def record_handed(
+    plugin: BaseToolPlugin,
+    result: ToolResult,
+    files: Sequence[str],
+) -> ToolResult:
+    """State the files a completed batch invocation was handed (#3578).
+
+    Args:
+        plugin: Plugin that ran the batch.
+        result: The batch's result.
+        files: The entries of ``ctx.files`` its command handed the tool.
+
+    Returns:
+        ``result`` unchanged. The files are stated only when the result
+        shows the invocation completed and inspected them.
+    """
+    if result.inspected_files is True:
+        plugin._record_checked(files)
+    return result
+
+
 def run_batch_check(
     ctx: PreparedExecution,
     *,

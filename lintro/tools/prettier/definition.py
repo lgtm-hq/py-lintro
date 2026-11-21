@@ -39,6 +39,7 @@ from lintro.tools.core.batch_runner import (
     BatchCommands,
     BatchFixPolicy,
     BatchSuccess,
+    record_handed,
     run_batch_check,
     run_batch_fix,
 )
@@ -464,25 +465,29 @@ class PrettierPlugin(BaseToolPlugin):
         cmd.extend(ctx.rel_files)
         logger.debug(f"[PrettierPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
-        return run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=lambda output: parse_prettier_output(output=output),
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.ISSUES_ONLY,
-                findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
-                report_cwd=True,
-            ),
-            cwd=ctx.cwd,
-            on_timeout=lambda: self._create_timeout_result(
-                timeout_val=ctx.timeout,
+        return record_handed(
+            self,
+            run_batch_check(
+                ctx,
+                plugin=self,
+                cmd=cmd,
+                parse=lambda output: parse_prettier_output(output=output),
+                policy=BatchCheckPolicy(
+                    success=BatchSuccess.ISSUES_ONLY,
+                    findings_exit_codes=PRETTIER_FINDINGS_EXIT_CODES,
+                    report_cwd=True,
+                ),
                 cwd=ctx.cwd,
+                on_timeout=lambda: self._create_timeout_result(
+                    timeout_val=ctx.timeout,
+                    cwd=ctx.cwd,
+                ),
+                on_error=lambda exc: self._execution_error_result(
+                    exc=exc,
+                    cwd=ctx.cwd,
+                ),
             ),
-            on_error=lambda exc: self._execution_error_result(
-                exc=exc,
-                cwd=ctx.cwd,
-            ),
+            ctx.files,
         )
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:

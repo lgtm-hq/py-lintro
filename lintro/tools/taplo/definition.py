@@ -296,6 +296,8 @@ class TaploPlugin(BaseToolPlugin):
 
         count = len(all_issues)
         output = "\n".join(all_outputs) if all_outputs else None
+        # Both invocations were handed ctx.rel_files and returned (#3578).
+        self._record_checked(ctx.files)
 
         return ToolResult.from_outcome(
             ToolOutcome(

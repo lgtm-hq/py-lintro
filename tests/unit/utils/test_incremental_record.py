@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -42,13 +41,17 @@ from lintro.tools import tool_manager
 from lintro.utils.execution import parallel_executor
 from lintro.utils.execution.run_context import RunContext
 from lintro.utils.execution.tool_configuration import ToolsToRunResult
-from lintro.utils.file_cache import FileFingerprint, FingerprintSnapshot
+from lintro.utils.file_cache import (
+    FileFingerprint,
+    FingerprintSnapshot,
+    snapshot_fingerprints,
+)
 from lintro.utils.incremental_record import (
     PendingCheck,
     _merged,
+    checked_files,
     finish_incremental_run,
     incremental_note,
-    spawned_files,
 )
 from tests.unit.conftest import FakeLogger
 
@@ -103,8 +106,8 @@ class _FakeTool(BaseToolPlugin):
     behaviour: Behaviour = _clean
     handed: list[list[str]] | None = None
     cacheable: bool = True
-    #: Which prepared files the plugin passes to the command it spawns;
-    #: None spawns nothing (an in-process or project-level tool).
+    #: Which prepared files the plugin states it handed to the tool; None
+    #: states nothing (a project-level tool, or a plugin not yet audited).
     passes: Callable[[list[str]], list[str]] | None = list
 
     @property
@@ -140,10 +143,7 @@ class _FakeTool(BaseToolPlugin):
         assert self.handed is not None
         self.handed.append(sorted(os.path.basename(f) for f in prepared.files))
         if self.passes is not None:
-            self._run_subprocess_result(
-                [sys.executable, "-c", "pass", *self.passes(prepared.rel_files)],
-                cwd=prepared.cwd,
-            )
+            self._record_checked(self.passes(prepared.files))
         return self.behaviour(prepared)
 
     def fix(self, paths: list[str], options: dict[str, object]) -> ToolResult:
@@ -605,10 +605,10 @@ def test_a_format_run_records_nothing_for_a_later_check(
 @pytest.mark.parametrize(
     ("passes", "rechecked"),
     [
-        (lambda files: [f for f in files if f == "good.txt"], ["bad.txt"]),
+        (lambda files: [f for f in files if f.endswith("good.txt")], ["bad.txt"]),
         (None, BOTH),
     ],
-    ids=["narrowed-to-one-file", "spawns-nothing"],
+    ids=["narrowed-to-one-file", "states-nothing"],
 )
 def test_only_files_passed_to_the_tool_are_recorded(
     monkeypatch: pytest.MonkeyPatch,
@@ -619,8 +619,7 @@ def test_only_files_passed_to_the_tool_are_recorded(
 ) -> None:
     """A plugin that narrows after ``prepare`` records only what it passed.
 
-    This is the guard for every plugin: one that names no file in a spawned
-    command, however clean its result, records nothing.
+    A plugin that states nothing, however clean its result, records nothing.
 
     Args:
         monkeypatch: Isolates the executor.
@@ -644,24 +643,26 @@ def test_only_files_passed_to_the_tool_are_recorded(
     assert_that(handed).is_equal_to([BOTH, rechecked])
 
 
-def test_an_option_value_is_not_taken_as_a_checked_file(tmp_path: Path) -> None:
-    """A file named only as an option's value was not handed for checking.
+def test_a_symlink_and_its_target_are_recorded_separately(tmp_path: Path) -> None:
+    """Only the path that was handed is recorded, never its real file.
 
     Args:
-        tmp_path: Directory holding the files.
+        tmp_path: Directory holding the target and a link to it.
     """
-    for name in ("conf.txt", "a.txt", "b.txt"):
-        (tmp_path / name).write_text("x\n")
-    cmd = ["tool", "--config", "conf.txt", "--no-color", "a.txt", "-c", "b.txt"]
-
-    found = spawned_files(cmd, str(tmp_path))
-
-    real = os.path.realpath(tmp_path)
-    assert_that(found).contains(os.path.join(real, "a.txt"))
-    assert_that(found).does_not_contain(
-        os.path.join(real, "conf.txt"),
-        os.path.join(real, "b.txt"),
+    target = tmp_path / "target.txt"
+    target.write_text("x\n")
+    link = tmp_path / "link.txt"
+    link.symlink_to(target)
+    snapshot = snapshot_fingerprints([str(link), str(target)])
+    pending = PendingCheck("fake", str(tmp_path), snapshot)
+    clean = ToolResult.from_outcome(
+        ToolOutcome(execution=Checked(success=True, inspected_files=True)),
+        name="fake",
     )
+
+    recorded = checked_files(pending, clean, {str(link)})
+
+    assert_that(sorted(recorded)).is_equal_to([str(link)])
 
 
 def test_a_file_one_discovery_could_not_read_is_never_recorded() -> None:

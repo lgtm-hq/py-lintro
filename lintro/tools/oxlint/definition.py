@@ -29,6 +29,7 @@ from lintro.tools.core.batch_runner import (
     BatchCommands,
     BatchFixPolicy,
     BatchSuccess,
+    record_handed,
     run_batch_check,
     run_batch_fix,
 )
@@ -367,23 +368,27 @@ class OxlintPlugin(BaseToolPlugin):
         logger.debug(f"[OxlintPlugin] Running: {' '.join(cmd)} (cwd={ctx.cwd})")
 
         parser = OxlintOutputParser()
-        result = run_batch_check(
-            ctx,
-            plugin=self,
-            cmd=cmd,
-            parse=parser.parse,
-            policy=BatchCheckPolicy(
-                success=BatchSuccess.ISSUES_ONLY,
-                findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
-                parse_stdout=True,
-                no_files=_is_no_files_result,
-                report_cwd=True,
-            ),
-            cwd=ctx.cwd,
-            on_timeout=lambda: self._create_timeout_result(
-                timeout_val=ctx.timeout,
+        result = record_handed(
+            self,
+            run_batch_check(
+                ctx,
+                plugin=self,
+                cmd=cmd,
+                parse=parser.parse,
+                policy=BatchCheckPolicy(
+                    success=BatchSuccess.ISSUES_ONLY,
+                    findings_exit_codes=OXLINT_FINDINGS_EXIT_CODES,
+                    parse_stdout=True,
+                    no_files=_is_no_files_result,
+                    report_cwd=True,
+                ),
                 cwd=ctx.cwd,
+                on_timeout=lambda: self._create_timeout_result(
+                    timeout_val=ctx.timeout,
+                    cwd=ctx.cwd,
+                ),
             ),
+            ctx.files,
         )
         return parser.finish(result)
 

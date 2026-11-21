@@ -62,10 +62,9 @@ from lintro.plugins.subprocess_executor import (
     run_subprocess_streaming,
     validate_subprocess_command,
 )
-from lintro.utils.incremental_record import spawned_files
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Iterable
 
     from lintro.plugins.file_processor import AggregatedResult, FileProcessingResult
     from lintro.utils.incremental_record import PendingCheck
@@ -146,8 +145,8 @@ class BaseToolPlugin(ABC):
         command_refusal: First command this instance refused to spawn, or None.
         incremental_pending: Files ``--incremental`` handed this instance,
             not yet recorded as checked.
-        incremental_spawned: Pending files named in a spawned subprocess's
-            argv; the only ones that may be recorded as checked.
+        incremental_checked: Discovered paths stated as handed to the tool
+            by a completed invocation; the only ones that may be recorded.
     """
 
     options: dict[str, object] = field(default_factory=dict, init=False)
@@ -170,9 +169,9 @@ class BaseToolPlugin(ABC):
         repr=False,
         compare=False,
     )
-    #: Real paths of the pending files this instance named in the argv of a
-    #: subprocess it spawned. Only these can be recorded as checked (#3578).
-    incremental_spawned: set[str] = field(
+    #: Discovered paths the code that ran the tool stated it handed to the
+    #: tool and that invocation completed. Only these can be recorded (#3578).
+    incremental_checked: set[str] = field(
         default_factory=set,
         init=False,
         repr=False,
@@ -273,7 +272,7 @@ class BaseToolPlugin(ABC):
         clone.include_venv = self.include_venv
         clone.command_refusal = None
         clone.incremental_pending = []
-        clone.incremental_spawned = set()
+        clone.incremental_checked = set()
         clone._isolate_execution_state()
         return clone
 
@@ -448,7 +447,6 @@ class BaseToolPlugin(ABC):
         """
         effective_timeout = self._get_effective_timeout(timeout)
         self._validate_subprocess_command(cmd)
-        self._note_spawned_files(cmd, cwd)
         # Only a plugin that asks for another decoding passes one, so every
         # other call is made exactly as before.
         decode_errors = self._subprocess_decode_errors()
@@ -539,7 +537,6 @@ class BaseToolPlugin(ABC):
         """
         effective_timeout = self._get_effective_timeout(timeout)
         self._validate_subprocess_command(cmd)
-        self._note_spawned_files(cmd, cwd)
         try:
             return run_subprocess_streaming(
                 cmd,
@@ -619,20 +616,18 @@ class BaseToolPlugin(ABC):
             self._record_command_refusal(exc)
             raise
 
-    def _note_spawned_files(self, cmd: list[str], cwd: str | None) -> None:
-        """Keep the pending files this command names as file arguments.
+    def _record_checked(self, paths: Iterable[str]) -> None:
+        """State that these discovered paths were handed to the tool and checked.
 
-        Under ``--incremental`` this is the only evidence that a file was
-        handed to the tool, so a plugin that narrows its file list after
-        :meth:`prepare` (a ruleset lookup, an include list, a project root)
-        records only what it actually passed (#3578).
+        Under ``--incremental`` this statement is the only way a file can be
+        recorded as checked (#3578). Call it after an invocation completed,
+        with the exact entries of ``ctx.files`` that invocation was given; a
+        plugin that never calls it records nothing.
 
         Args:
-            cmd: Command about to be spawned.
-            cwd: Directory it runs in; None is lintro's own.
+            paths: Entries of ``ctx.files`` the completed invocation covered.
         """
-        if self.incremental_pending:
-            self.incremental_spawned |= spawned_files(cmd, cwd)
+        self.incremental_checked.update(paths)
 
     def _record_command_refusal(self, refusal: UnsafeCommandError) -> None:
         """Keep the first refusal of this run on :attr:`command_refusal`.

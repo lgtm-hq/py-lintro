@@ -7,9 +7,10 @@ then are files recorded, and only the ones the run proved clean:
 
 * only a ``check`` run records; a ``format`` run's verdict is settled later by
   the verify pass, so it records nothing;
-* only files the plugin named as arguments of a command it spawned can be
-  recorded (:func:`spawned_files`): a plugin that narrows its list after
-  ``prepare``, or hands files some other way, records nothing it did not pass;
+* only discovered paths that the code which ran the tool stated it handed
+  to a completed invocation (``BaseToolPlugin._record_checked``) can be
+  recorded, under their exact discovery key: a plugin that states nothing
+  records nothing;
 * nothing is recorded unless the result is complete: the tool ran and was not
   unavailable, refused, skipped, timed out or failed, and its verdict is
   either clean or carries findings from a report parsed in full
@@ -25,7 +26,6 @@ records nothing either.
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass, replace
 from typing import TYPE_CHECKING
 
@@ -33,8 +33,6 @@ from lintro.utils.file_cache import FingerprintSnapshot, ToolCache
 from lintro.utils.refused_command import command_refusal
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
     from lintro.models.core.tool_result import ToolResult
     from lintro.utils.file_cache import FileFingerprint
 
@@ -103,66 +101,17 @@ def _complete(result: ToolResult) -> bool:
     return result.findings_complete
 
 
-#: Option names whose value is a file the tool reads as input to the check
-#: (a config, ruleset or baseline) or writes (a report), not a file it checks.
-_FILE_VALUE_OPTION = re.compile(
-    r"^-{1,2}[a-z-]*(config|conf|rc|rule|setting|baseline|ignore|exclude|"
-    r"manifest|project|profile|output|report|cache|policy|style|schema)",
-    re.IGNORECASE,
-)
-#: Short options that take such a file (``-c .yamllint.yml``, ``-o out``).
-_SHORT_FILE_VALUE_OPTIONS = frozenset({"-c", "-o", "-p", "-r"})
-
-
-def _file_option_value(previous: str) -> bool:
-    """Report whether a token is the value of a config- or report-file option.
-
-    Args:
-        previous: The token before it.
-
-    Returns:
-        True when ``previous`` is such an option without an inline value.
-    """
-    if "=" in previous:
-        return False
-    return previous in _SHORT_FILE_VALUE_OPTIONS or bool(
-        _FILE_VALUE_OPTION.match(previous),
-    )
-
-
-def spawned_files(cmd: Sequence[str], cwd: str | None) -> set[str]:
-    """Return the real paths a command names as file arguments.
-
-    The program and option tokens are left out, and so is the value of an
-    option that names a config, ruleset, baseline or report file: a file
-    passed only that way is read or written by the tool, not checked.
-
-    Args:
-        cmd: Command about to be spawned.
-        cwd: Directory it runs in; None is lintro's own.
-
-    Returns:
-        Real paths of the candidate file arguments.
-    """
-    base = cwd or os.getcwd()
-    return {
-        os.path.realpath(os.path.join(base, token))
-        for previous, token in zip(cmd, cmd[1:], strict=False)
-        if token and not token.startswith("-") and not _file_option_value(previous)
-    }
-
-
 def checked_files(
     pending: PendingCheck,
     result: ToolResult,
-    spawned: set[str],
+    stated: set[str],
 ) -> dict[str, FileFingerprint]:
     """Return the handed files the run checked to completion with no finding.
 
     Args:
         pending: What discovery handed the tool.
         result: The tool's result.
-        spawned: Real paths the plugin named in the commands it spawned.
+        stated: Discovered paths stated as handed to a completed invocation.
 
     Returns:
         Discovery-time fingerprints of the files to record, by path. Empty
@@ -170,10 +119,13 @@ def checked_files(
     """
     if not _complete(result):
         return {}
-    handed = {os.path.realpath(path): path for path in pending.snapshot.fingerprints}
+    # Paths are compared as written (made absolute against the run's
+    # directory), never resolved: a symlink and its target are two entries,
+    # each recorded only if it was itself handed and checked.
+    handed = pending.snapshot.fingerprints
     flagged: set[str] = set()
     for issue in result.issues:
-        name = os.path.realpath(os.path.join(pending.cwd, issue.file or ""))
+        name = os.path.normpath(os.path.join(pending.cwd, issue.file or ""))
         if not issue.file or name not in handed:
             return {}
         flagged.add(name)
@@ -181,16 +133,16 @@ def checked_files(
         None
         if result.inspected_paths is None
         else {
-            os.path.realpath(os.path.join(pending.cwd, path))
+            os.path.normpath(os.path.join(pending.cwd, path))
             for path in result.inspected_paths
         }
     )
     return {
-        path: pending.snapshot.fingerprints[path]
-        for real, path in handed.items()
-        if real in spawned
-        and real not in flagged
-        and (inspected is None or real in inspected)
+        path: fingerprint
+        for path, fingerprint in handed.items()
+        if path in stated
+        and path not in flagged
+        and (inspected is None or path in inspected)
     }
 
 
@@ -241,8 +193,8 @@ def _pending(tool: object) -> list[PendingCheck]:
     return taken
 
 
-def _spawned(tool: object) -> set[str]:
-    """Take the files a tool instance named in spawned commands.
+def _stated(tool: object) -> set[str]:
+    """Take the paths a tool instance stated it handed and checked.
 
     Args:
         tool: The plugin instance that ran; any object is accepted.
@@ -250,11 +202,11 @@ def _spawned(tool: object) -> set[str]:
     Returns:
         Real paths; empty for an object that tracks none.
     """
-    spawned = getattr(tool, "incremental_spawned", None)
-    if not isinstance(spawned, set):
+    stated = getattr(tool, "incremental_checked", None)
+    if not isinstance(stated, set):
         return set()
-    taken = {path for path in spawned if isinstance(path, str)}
-    spawned.clear()
+    taken = {path for path in stated if isinstance(path, str)}
+    stated.clear()
     return taken
 
 
@@ -300,7 +252,7 @@ def finish_incremental_run(
         The result, with the ``--incremental`` note added for a tool that
         declares ``incremental_cacheable=False``.
     """
-    pending, spawned = _pending(tool), _spawned(tool)
+    pending, stated = _pending(tool), _stated(tool)
     if pending and record:
         merged = _merged(pending)
         refused = command_refusal(tool) is not None
@@ -309,7 +261,7 @@ def finish_incremental_run(
             (
                 {}
                 if merged is None or refused
-                else checked_files(merged, result, spawned)
+                else checked_files(merged, result, stated)
             ),
         )
     definition = getattr(tool, "definition", None)
