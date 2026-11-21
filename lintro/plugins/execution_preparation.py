@@ -22,6 +22,7 @@ from lintro.plugins.file_discovery import (
     validate_paths,
 )
 from lintro.plugins.protocol import ToolDefinition
+from lintro.utils.option_paths import option_safe_paths
 from lintro.utils.tool_snapshots import (
     ALLOW_VERSION_LAG_ENV,
     snapshot_is_runnable,
@@ -45,7 +46,9 @@ class PreparedExecution:
 
     Attributes:
         files: Absolute paths to the discovered files.
-        rel_files: File paths relative to the execution directory.
+        rel_files: File paths relative to the execution directory. A path
+            starting with ``-`` is stored as ``./<path>`` so no tool reads it
+            as an option (#3584).
         cwd: Working directory for command execution.
         timeout: Resolved subprocess timeout in seconds.
         resolved_commands: Command prefixes the version gate resolved for
@@ -61,6 +64,10 @@ class PreparedExecution:
         compare=False,
         hash=False,
     )
+
+    def __post_init__(self) -> None:
+        """Guard every relative path, however the execution was built."""
+        object.__setattr__(self, "rel_files", option_safe_paths(self.rel_files))
 
 
 def get_effective_timeout(

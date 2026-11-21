@@ -13,6 +13,7 @@ from lintro.models.core.tool_result import ToolResult
 from lintro.parsers.base_parser import strip_ansi_codes
 from lintro.plugins.base import PreparedExecution
 from lintro.tools.core.timeout_utils import create_timeout_result
+from lintro.utils.option_paths import option_safe_paths
 from lintro.utils.tsconfig import (
     discover_tsconfigs,
     has_explicit_scoping,
@@ -391,8 +392,11 @@ def _check_multi_project(
 
             # Build and run
             cmd = plugin._build_command(
+                # A path starting with ``-`` would be read as an option (#3584).
                 files=(
-                    [os.path.relpath(f, project_dir) for f in project_files]
+                    option_safe_paths(
+                        [os.path.relpath(f, project_dir) for f in project_files],
+                    )
                     if not project_path
                     else []
                 ),

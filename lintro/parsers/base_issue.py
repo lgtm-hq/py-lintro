@@ -11,10 +11,59 @@ The base class includes:
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from typing import ClassVar
 
 from lintro.enums.severity_level import SeverityLevel, normalize_severity_level
+
+#: Separators a tool may put around lintro's guard. A backslash separates
+#: path parts on Windows only; on POSIX it is an ordinary file-name
+#: character, so ``a\.\-x.txt`` is one name and must be reported unchanged.
+_SEPARATORS = "/\\" if os.sep == "\\" else "/"
+#: ``lintro.utils.option_paths.SAFE_FIRST_CHARACTERS``; a test pins the copy.
+_SAFE_FIRST = "_.+[({$"
+
+
+def _guarded_name(rest: str) -> bool:
+    r"""Return whether ``rest`` is a name lintro would have prefixed with ``./``.
+
+    Mirrors ``lintro.utils.option_paths.starts_safely``; a test pins that the
+    two agree. A parser cannot import it without a parsers/utils cycle.
+
+    Args:
+        rest: The text after a ``./`` (or ``.\\``) in a reported path.
+
+    Returns:
+        True when the first character is not a letter, a digit, a safe first
+        character or a path separator.
+    """
+    first = rest[:1]
+    return bool(first) and not (first.isalnum() or first in _SAFE_FIRST + _SEPARATORS)
+
+
+def strip_option_guard(path: str) -> str:
+    """Undo lintro's ``./`` guard on a path a tool reported back (#3584).
+
+    Lintro hands ``@b.ts`` over as ``./@b.ts``. Tools report that as given
+    (``./@b.ts``) or joined to their directory (``/proj/./@b.ts``). Only that
+    ``./`` is removed; nothing else is normalised, so ``..`` and symlinks stay
+    as the tool wrote them.
+
+    Args:
+        path: A path as a tool printed it.
+
+    Returns:
+        ``path`` without the ``./`` lintro added before a guarded name.
+    """
+    for sep in _SEPARATORS:
+        guard = f".{sep}"
+        if path.startswith(guard) and _guarded_name(path[2:]):
+            return path[2:]
+        index = path.find(f"{sep}{guard}")
+        if index >= 0 and _guarded_name(path[index + 3 :]):
+            return path[: index + 1] + path[index + 3 :]
+    return path
 
 
 @dataclass
@@ -66,6 +115,21 @@ class BaseIssue:
     doc_url: str = field(default="", repr=False)
     category: str = field(default="")
     fixable: bool = field(default=False)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        """Record ``file`` without the guard lintro added for the tool (#3584).
+
+        Lintro hands a file named like an option to the tool as ``./-name``,
+        and tools report that path back. Every issue, whether built by a
+        parser or rewritten later, keeps the name the user sees: ``-name``.
+
+        Args:
+            name: Attribute being set.
+            value: New value.
+        """
+        if name == "file" and isinstance(value, str):
+            value = strip_option_guard(value)
+        super().__setattr__(name, value)
 
     def get_severity(self) -> SeverityLevel:
         """Return the normalized severity for this issue.

@@ -35,6 +35,7 @@ from lintro.tools.core.option_validators import (
     validate_bool,
     validate_str,
 )
+from lintro.utils.option_paths import option_safe_path
 from lintro.utils.path_utils import find_file_upward
 
 # Constants for Yamllint configuration
@@ -258,7 +259,9 @@ class YamllintPlugin(BaseToolPlugin):
             else os.path.dirname(abs_config_file)
         )
         try:
-            return config_args, run_dir, os.path.relpath(abs_file, run_dir)
+            # A name such as ``@x.yaml`` stays a path (#3584).
+            relative = option_safe_path(os.path.relpath(abs_file, run_dir))
+            return config_args, run_dir, relative
         except ValueError:
             # Different drive on Windows: no relative path exists.
             return config_args, file_dir, abs_file

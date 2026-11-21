@@ -913,12 +913,9 @@ class HtmlValidatePlugin(BaseToolPlugin):
         # Always pass the literal files lintro discovered, never a glob or a
         # directory: html-validate expands those through ``fs.globSync``, which
         # aborts the whole run on Bun builds that lack it (issue #1727).
-        # A name starting with "-" would be read as an option; "./" keeps it
-        # a path, and html-validate still reports it under its full path.
-        file_args: list[str] = [
-            f"./{path}" if path.startswith("-") else path
-            for path in ctx.rel_files or ctx.files
-        ]
+        # ``rel_files`` already carries a name starting with "-" as "./-name"
+        # (#3584); absolute paths cannot be read as options.
+        file_args: list[str] = ctx.rel_files or ctx.files
         cmd = [*invocation.cmd, *file_args]
 
         logger.debug(

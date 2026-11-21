@@ -141,7 +141,9 @@ class <Tool>Plugin(BaseToolPlugin):
 - Always use list args in subprocess calls, never `shell=True`; add `# nosec B404` on
   the `import subprocess` line.
 - `prepare()` handles file discovery and filtering by `file_patterns`. Use
-  `ctx.rel_files` for the filtered list.
+  `ctx.rel_files` for the filtered list. It hands a path that could be read as an option
+  or argument file (`-x`, `@x`, …) over as `./<path>`; if you build your own relative
+  paths, pass them through `lintro.utils.option_paths.option_safe_paths` (#3584).
 - If the tool has per-rule documentation URLs, implement `doc_url(self, code)` and add a
   `DocUrlTemplate` entry (see Step 3).
 

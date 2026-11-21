@@ -42,3 +42,6 @@ Best Practices (Silver).
 
 - No execution of untrusted code
 - Docker image and scripts follow hardening practices (pinned actions, validated inputs)
+- A relative path whose first character is not a letter, digit or one of `_ . + [ ( { $`
+  is handed to a tool as `./<path>`, so a file named like an option or argument file
+  (`-x`, `@x`, `#x`) is never read as one; reports still show `<path>` (#3584)
